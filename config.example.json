@@ -1,0 +1,10 @@
+{
+  "nova_ws_url": "wss://ws.nova-claw.agi.amazon.dev",
+  "nova_api_key": "",
+  "nova_user_id": "",
+  "openclaw_gateway_url": "http://127.0.0.1:18789",
+  "openclaw_gateway_token": "",
+  "dm_policy": "open",
+  "allow_from": [],
+  "max_history": 20
+}
