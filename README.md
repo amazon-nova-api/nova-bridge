@@ -20,15 +20,23 @@ Nova user ◀──WS── API Gateway ◀──WS── nova-bridge
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. Install
 
 ```bash
-pip install -r requirements.txt
+pip install git+https://github.com/amazon-nova-api/nova-bridge.git
 ```
 
 ### 2. Configure
 
-Copy the example config and fill in your credentials:
+Create a `config.json` in the directory where you'll run the bridge, or use environment variables:
+
+```bash
+export NOVA_API_KEY="your-nova-api-key"
+export NOVA_USER_ID="your-user-id"
+export OPENCLAW_GATEWAY_TOKEN="your-gateway-token"
+```
+
+Or copy the example config and fill in your credentials:
 
 ```bash
 cp config.example.json config.json
@@ -47,14 +55,6 @@ cp config.example.json config.json
 }
 ```
 
-Or use environment variables instead (they override the config file):
-
-```bash
-export NOVA_API_KEY="your-nova-api-key"
-export NOVA_USER_ID="your-user-id"
-export OPENCLAW_GATEWAY_TOKEN="your-gateway-token"
-```
-
 ### 3. Start OpenClaw gateway (if not already running)
 
 ```bash
@@ -63,10 +63,10 @@ openclaw gateway --port 18789
 
 The gateway token is shown when the gateway starts, or you can find it in `~/.openclaw/openclaw.json` under `gateway.auth.token`.
 
-### 4. Run the sidecar
+### 4. Run
 
 ```bash
-python nova_bridge.py
+nova-bridge
 ```
 
 You should see:
@@ -125,29 +125,14 @@ systemctl --user status nova-bridge.service
 journalctl --user -u nova-bridge.service -f
 ```
 
-## Important: Disable the Nova Channel Plugin
-
-If your OpenClaw instance has the built-in Nova channel plugin enabled (under `channels.nova` in `~/.openclaw/openclaw.json`), disable it before running the sidecar. Both would compete for the same WebSocket connection.
-
-In `~/.openclaw/openclaw.json`, set:
-
-```json
-{
-  "channels": {
-    "nova": {
-      "enabled": false
-    }
-  }
-}
-```
-
-Then restart the gateway: `systemctl --user restart openclaw-gateway.service`
-
 ## Testing
 
 The included test script sends a message to the bot via the Nova API Gateway and verifies the response comes back on a test user's WebSocket. Requires AWS credentials with access to the Nova DynamoDB table and API Gateway Management API.
 
 ```bash
+# Install test dependencies
+pip install nova-bridge[test]
+
 # List active WebSocket connections
 python test_nova_ws.py --list
 
