@@ -271,9 +271,14 @@ HEARTBEAT_INTERVAL = 30  # seconds
 async def _heartbeat_loop(ws: ws_client.ClientConnection) -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL)
-        ping = json.dumps({"action": "ping", "timestamp": int(time.time() * 1000)})
-        await ws.send(ping)
-        log.debug("Heartbeat sent")
+        try:
+            ping = json.dumps({"action": "ping", "timestamp": int(time.time() * 1000)})
+            await ws.send(ping)
+            log.debug("Heartbeat sent")
+        except Exception as exc:
+            log.warning("Heartbeat failed, closing connection: %s", exc)
+            await ws.close()
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -319,10 +324,20 @@ async def _run(cfg: dict[str, Any]) -> None:
                 async with ws_client.connect(
                     ws_url,
                     additional_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=5,
                 ) as ws:
                     log.info("WebSocket connected")
                     attempt = 0
 
+                    async def _close_on_stop() -> None:
+                        """Close the WebSocket when stop is signalled."""
+                        await stop.wait()
+                        log.info("Stop signal received, closing WebSocket")
+                        await ws.close()
+
+                    stop_task = asyncio.create_task(_close_on_stop())
                     heartbeat_task = asyncio.create_task(_heartbeat_loop(ws))
                     try:
                         async for raw in ws:
@@ -333,10 +348,12 @@ async def _run(cfg: dict[str, Any]) -> None:
                             )
                     finally:
                         heartbeat_task.cancel()
-                        try:
-                            await heartbeat_task
-                        except asyncio.CancelledError:
-                            pass
+                        stop_task.cancel()
+                        for t in (heartbeat_task, stop_task):
+                            try:
+                                await t
+                            except asyncio.CancelledError:
+                                pass
 
             except (
                 websockets.exceptions.ConnectionClosed,
