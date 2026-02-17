@@ -166,8 +166,11 @@ def _is_allowed(user_id: str, cfg: dict[str, Any]) -> bool:
     policy = cfg["dm_policy"]
     if policy == "open":
         return True
-    # allowlist
+    # allowlist — always include the bot's own user ID
     allow_from: list[str] = [s.lower() for s in cfg["allow_from"]]
+    own_id = cfg.get("nova_user_id", "")
+    if own_id and own_id.lower() not in allow_from:
+        allow_from.append(own_id.lower())
     if "*" in allow_from:
         return True
     if not allow_from:
