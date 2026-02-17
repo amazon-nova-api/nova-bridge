@@ -432,6 +432,47 @@ def _preflight_check(cfg: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+PID_FILE = Path.home() / ".nova-bridge" / "nova-bridge.pid"
+
+
+def _kill_existing() -> None:
+    """Kill any existing nova-bridge instance using the PID file."""
+    if not PID_FILE.exists():
+        return
+    try:
+        old_pid = int(PID_FILE.read_text().strip())
+        os.kill(old_pid, signal.SIGTERM)
+        log.info("Stopped previous instance (pid %d)", old_pid)
+        # Give it a moment to shut down
+        for _ in range(10):
+            try:
+                os.kill(old_pid, 0)  # check if still alive
+                time.sleep(0.5)
+            except OSError:
+                break
+        else:
+            # Still alive after 5s, force kill
+            try:
+                os.kill(old_pid, signal.SIGKILL)
+                log.info("Force-killed previous instance (pid %d)", old_pid)
+            except OSError:
+                pass
+    except (ValueError, OSError):
+        pass  # stale PID file or process already gone
+    PID_FILE.unlink(missing_ok=True)
+
+
+def _write_pid() -> None:
+    """Write current PID to file."""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+
+
+def _cleanup_pid() -> None:
+    """Remove PID file on exit."""
+    PID_FILE.unlink(missing_ok=True)
+
+
 def _daemonize(log_file: str) -> None:
     """Fork into background and redirect output to a log file."""
     pid = os.fork()
@@ -455,6 +496,7 @@ def _daemonize(log_file: str) -> None:
 
 def main() -> None:
     import argparse
+    import atexit
     parser = argparse.ArgumentParser(description="Nova WebSocket Bridge for OpenClaw")
     parser.add_argument("-d", "--daemon", action="store_true", help="Run in the background")
     default_log_dir = Path.home() / ".nova-bridge" / "logs"
@@ -465,10 +507,15 @@ def main() -> None:
     cfg = _load_config()
     _validate_config(cfg)
 
+    _kill_existing()
+
     if args.daemon:
         log_path = Path(args.log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         _daemonize(args.log_file)
+
+    _write_pid()
+    atexit.register(_cleanup_pid)
 
     log.info("Nova Bridge starting")
     log.info("  WS endpoint : %s", cfg["nova_ws_url"])
