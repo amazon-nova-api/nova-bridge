@@ -457,7 +457,7 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Nova WebSocket Bridge for OpenClaw")
     parser.add_argument("-d", "--daemon", action="store_true", help="Run in the background")
-    default_log_dir = Path.home() / "nova-bridge" / "logs"
+    default_log_dir = Path.home() / ".nova-bridge" / "logs"
     default_log_file = str(default_log_dir / "nova-bridge.log")
     parser.add_argument("--log-file", default=default_log_file, help=f"Log file when running as daemon (default: {default_log_file})")
     args = parser.parse_args()
