@@ -383,13 +383,78 @@ async def _run(cfg: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pre-flight check
+# ---------------------------------------------------------------------------
+
+
+def _preflight_check(cfg: dict[str, Any]) -> None:
+    """Verify the OpenClaw chat completions endpoint is reachable."""
+    import urllib.request
+    import urllib.error
+
+    url = f"{cfg['openclaw_gateway_url'].rstrip('/')}/v1/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if cfg["openclaw_gateway_token"]:
+        headers["Authorization"] = f"Bearer {cfg['openclaw_gateway_token']}"
+
+    payload = json.dumps({"model": "default", "messages": [{"role": "user", "content": "ping"}]}).encode()
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            log.info("  Chat completions endpoint OK")
+    except urllib.error.HTTPError as e:
+        if e.code == 405:
+            log.error("Chat completions endpoint returned 405 Method Not Allowed.")
+            log.error("Enable it in OpenClaw with:")
+            log.error("  openclaw config set gateway.http.endpoints.chatCompletions.enabled true")
+            log.error("Then restart OpenClaw.")
+            sys.exit(1)
+        # Other HTTP errors (e.g. 400 from bad ping) are fine — endpoint exists
+        log.info("  Chat completions endpoint OK (status %d)", e.code)
+    except Exception as e:
+        log.warning("Could not reach OpenClaw at %s: %s", url, e)
+        log.warning("Make sure OpenClaw gateway is running.")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
+def _daemonize(log_file: str) -> None:
+    """Fork into background and redirect output to a log file."""
+    pid = os.fork()
+    if pid > 0:
+        print(f"nova-bridge running in background (pid {pid}), logging to {log_file}")
+        sys.exit(0)
+
+    os.setsid()
+    # Redirect stdout/stderr to log file
+    f = open(log_file, "a")
+    os.dup2(f.fileno(), sys.stdout.fileno())
+    os.dup2(f.fileno(), sys.stderr.fileno())
+    # Reconfigure logging to use the new stderr
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        force=True,
+    )
+
+
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Nova WebSocket Bridge for OpenClaw")
+    parser.add_argument("-d", "--daemon", action="store_true", help="Run in the background")
+    parser.add_argument("--log-file", default="nova-bridge.log", help="Log file when running as daemon (default: nova-bridge.log)")
+    args = parser.parse_args()
+
     cfg = _load_config()
     _validate_config(cfg)
+
+    if args.daemon:
+        _daemonize(args.log_file)
 
     log.info("Nova Bridge starting")
     log.info("  WS endpoint : %s", cfg["nova_ws_url"])
@@ -398,6 +463,9 @@ def main() -> None:
     log.info("  DM policy   : %s", cfg["dm_policy"])
     if cfg["dm_policy"] == "allowlist":
         log.info("  Allow from  : %s", cfg["allow_from"] or "(empty — all blocked)")
+
+    # Pre-flight check: verify chat completions endpoint is reachable
+    _preflight_check(cfg)
 
     asyncio.run(_run(cfg))
 
