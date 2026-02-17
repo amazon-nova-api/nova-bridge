@@ -269,15 +269,25 @@ async def _handle_message(
 # ---------------------------------------------------------------------------
 
 HEARTBEAT_INTERVAL = 30  # seconds
+HEARTBEAT_SEND_TIMEOUT = 10  # seconds — if send takes longer, connection is dead
 
 
 async def _heartbeat_loop(ws: ws_client.ClientConnection) -> None:
+    missed = 0
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL)
         try:
             ping = json.dumps({"action": "ping", "timestamp": int(time.time() * 1000)})
-            await ws.send(ping)
+            await asyncio.wait_for(ws.send(ping), timeout=HEARTBEAT_SEND_TIMEOUT)
+            missed = 0
             log.debug("Heartbeat sent")
+        except asyncio.TimeoutError:
+            missed += 1
+            log.warning("Heartbeat send timed out (%d consecutive)", missed)
+            if missed >= 2:
+                log.warning("Connection appears dead, forcing close")
+                await ws.close()
+                return
         except Exception as exc:
             log.warning("Heartbeat failed, closing connection: %s", exc)
             await ws.close()
@@ -447,13 +457,17 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Nova WebSocket Bridge for OpenClaw")
     parser.add_argument("-d", "--daemon", action="store_true", help="Run in the background")
-    parser.add_argument("--log-file", default="nova-bridge.log", help="Log file when running as daemon (default: nova-bridge.log)")
+    default_log_dir = Path.home() / "nova-bridge" / "logs"
+    default_log_file = str(default_log_dir / "nova-bridge.log")
+    parser.add_argument("--log-file", default=default_log_file, help=f"Log file when running as daemon (default: {default_log_file})")
     args = parser.parse_args()
 
     cfg = _load_config()
     _validate_config(cfg)
 
     if args.daemon:
+        log_path = Path(args.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         _daemonize(args.log_file)
 
     log.info("Nova Bridge starting")
